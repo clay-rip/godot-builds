@@ -110,6 +110,9 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" "ndk;$NDK_VERSION"
 
+      - name: Install Swappy
+        working-directory: godot
+        run: python misc/scripts/install_swappy_android.py
       - name: Build
         working-directory: godot
         run: |
