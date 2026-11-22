@@ -1,0 +1,166 @@
+name: Build Godot
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - custom.py
+      - small.gdbuild
+      - .github/workflows/build-godot.yml
+
+env:
+  GODOT_TAG: 4.7.2-stable
+  TARGETS: template_release template_debug
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
+            libgl1-mesa-dev libglu-dev libasound2-dev libpulse-dev libudev-dev \
+            libdbus-1-dev libspeechd-dev libfontconfig1-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev libdecor-0-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install scons
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Checkout Godot ${{ env.GODOT_TAG }}
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ${{ env.GODOT_TAG }}
+          path: godot
+          fetch-depth: 1
+
+      - name: Apply config
+        run: cp repo/custom.py repo/small.gdbuild godot/
+
+      - name: Build
+        working-directory: godot
+        run: |
+          for target in $TARGETS; do
+            scons platform=linuxbsd arch=${{ matrix.arch }} target=$target build_profile=small.gdbuild
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-linux-${{ matrix.arch }}
+          path: godot/bin/*
+          if-no-files-found: error
+
+  android:
+    name: Android arm64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: python -m pip install scons
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Checkout Godot ${{ env.GODOT_TAG }}
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ${{ env.GODOT_TAG }}
+          path: godot
+          fetch-depth: 1
+
+      - name: Apply config
+        run: cp repo/custom.py repo/small.gdbuild godot/
+
+      - name: Install the NDK version this Godot tag expects
+        run: |
+          NDK_VERSION=$(sed -n '/def get_ndk_version/,/return/p' godot/platform/android/detect.py \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]{5,}' | head -n1)
+          test -n "$NDK_VERSION" || { echo "Could not determine NDK version from detect.py"; exit 1; }
+          echo "Using NDK $NDK_VERSION"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "ndk;$NDK_VERSION"
+
+      - name: Build
+        working-directory: godot
+        run: |
+          for target in $TARGETS; do
+            scons platform=android arch=arm64 target=$target build_profile=small.gdbuild generate_android_binaries=yes
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-android-arm64
+          path: godot/bin/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install scons
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Checkout Godot ${{ env.GODOT_TAG }}
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ${{ env.GODOT_TAG }}
+          path: godot
+          fetch-depth: 1
+
+      - name: Apply onfig
+        shell: bash
+        run: cp repo/custom.py repo/small.gdbuild godot/
+
+      - name: Build
+        shell: bash
+        working-directory: godot
+        run: |
+          for target in $TARGETS; do
+            scons platform=windows arch=x86_64 target=$target build_profile=small.gdbuild
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-windows-x86_64
+          path: godot/bin/*
+          if-no-files-found: error
+
